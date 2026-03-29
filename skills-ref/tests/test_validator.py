@@ -12,30 +12,34 @@ description: A test skill
 ---
 # My Skill
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
     assert errors == []
 
 
 def test_nonexistent_path(tmp_path):
-    errors = validate(tmp_path / "nonexistent")
-    assert len(errors) == 1
-    assert "does not exist" in errors[0]
+    warnings, errors = validate(tmp_path / "nonexistent")
+    assert len(warnings) == 1
+    assert "does not exist" in warnings[0]
+    assert errors == []
 
 
 def test_not_a_directory(tmp_path):
     file_path = tmp_path / "file.txt"
     file_path.write_text("test")
-    errors = validate(file_path)
-    assert len(errors) == 1
-    assert "Not a directory" in errors[0]
+    warnings, errors = validate(file_path)
+    assert len(warnings) == 1
+    assert "Not a directory" in warnings[0]
+    assert errors == []
 
 
 def test_missing_skill_md(tmp_path):
     skill_dir = tmp_path / "my-skill"
     skill_dir.mkdir()
-    errors = validate(skill_dir)
-    assert len(errors) == 1
-    assert "Missing required file: SKILL.md" in errors[0]
+    warnings, errors = validate(skill_dir)
+    assert len(warnings) == 1
+    assert "Missing required file: SKILL.md" in warnings[0]
+    assert errors == []
 
 
 def test_invalid_name_uppercase(tmp_path):
@@ -47,7 +51,7 @@ description: A test skill
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
     assert any("lowercase" in e for e in errors)
 
 
@@ -61,7 +65,7 @@ description: A test skill
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
     assert any("exceeds" in e and "character limit" in e for e in errors)
 
 
@@ -74,7 +78,7 @@ description: A test skill
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
     assert any("cannot start or end with a hyphen" in e for e in errors)
 
 
@@ -87,7 +91,7 @@ description: A test skill
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
     assert any("consecutive hyphens" in e for e in errors)
 
 
@@ -100,7 +104,7 @@ description: A test skill
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
     assert any("invalid characters" in e for e in errors)
 
 
@@ -113,7 +117,7 @@ description: A test skill
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
     assert any("must match skill name" in e for e in errors)
 
 
@@ -127,7 +131,7 @@ unknown_field: should not be here
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
     assert any("Unexpected fields" in e for e in errors)
 
 
@@ -143,7 +147,8 @@ metadata:
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
     assert errors == []
 
 
@@ -158,7 +163,8 @@ allowed-tools: Bash(jq:*) Bash(git:*)
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
     assert errors == []
 
 
@@ -172,7 +178,8 @@ description: A skill with Chinese name
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
     assert errors == []
 
 
@@ -186,7 +193,8 @@ description: A skill with Russian name
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
     assert errors == []
 
 
@@ -200,7 +208,8 @@ description: A skill with Russian lowercase name
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
     assert errors == []
 
 
@@ -214,7 +223,7 @@ description: A skill with Russian uppercase name
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
     assert any("lowercase" in e for e in errors)
 
 
@@ -229,7 +238,7 @@ description: {long_desc}
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
     assert any("exceeds" in e and "1024" in e for e in errors)
 
 
@@ -244,7 +253,8 @@ compatibility: Requires Python 3.11+
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
     assert errors == []
 
 
@@ -260,7 +270,7 @@ compatibility: {long_compat}
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
     assert any("exceeds" in e and "500" in e for e in errors)
 
 
@@ -286,5 +296,189 @@ description: A test skill
 ---
 Body
 """)
-    errors = validate(skill_dir)
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
     assert errors == [], f"Expected no errors, got: {errors}"
+
+
+def test_all_files_referenced(tmp_path):
+    """All files in skill directory should be referenced."""
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    refs_dir = skill_dir / "references"
+    refs_dir.mkdir()
+    scripts_dir = skill_dir / "scripts"
+    scripts_dir.mkdir()
+
+    (refs_dir / "GUIDE.md").write_text("# Guide")
+    (scripts_dir / "run.py").write_text("# Script")
+
+    (skill_dir / "SKILL.md").write_text("""---
+name: my-skill
+description: A test skill
+---
+See [the guide](references/GUIDE.md) and run `scripts/run.py`.
+""")
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
+    assert errors == []
+
+
+def test_orphaned_file_warning(tmp_path):
+    """Unreferenced files should generate warnings."""
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    refs_dir = skill_dir / "references"
+    refs_dir.mkdir()
+
+    (refs_dir / "GUIDE.md").write_text("# Guide")
+    (refs_dir / "UNUSED.md").write_text("# Unused")
+
+    (skill_dir / "SKILL.md").write_text("""---
+name: my-skill
+description: A test skill
+---
+See [the guide](references/GUIDE.md) for details.
+""")
+    warnings, errors = validate(skill_dir)
+    assert len(warnings) == 1
+    assert "Orphaned file" in warnings[0]
+    assert "references/UNUSED.md" in warnings[0]
+
+
+def test_multiple_orphaned_files(tmp_path):
+    """Multiple orphaned files should all be reported."""
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    refs_dir = skill_dir / "references"
+    refs_dir.mkdir()
+    scripts_dir = skill_dir / "scripts"
+    scripts_dir.mkdir()
+
+    (refs_dir / "UNUSED1.md").write_text("# Unused 1")
+    (refs_dir / "UNUSED2.md").write_text("# Unused 2")
+    (scripts_dir / "orphan.py").write_text("# Orphan")
+
+    (skill_dir / "SKILL.md").write_text("""---
+name: my-skill
+description: A test skill
+---
+No file references here.
+""")
+    warnings, errors = validate(skill_dir)
+    assert len(warnings) == 3
+    assert any("UNUSED1.md" in w for w in warnings)
+    assert any("UNUSED2.md" in w for w in warnings)
+    assert any("orphan.py" in w for w in warnings)
+
+
+def test_example_paths_not_flagged(tmp_path):
+    """Example paths in skill body should not cause false positives."""
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+
+    (skill_dir / "SKILL.md").write_text("""---
+name: my-skill
+description: A test skill
+---
+Example usage:
+
+```
+python scripts/example.py --input data/file.txt
+```
+
+This is just an example, the files don't need to exist.
+""")
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
+    assert errors == []
+
+
+def test_hidden_files_ignored(tmp_path):
+    """Hidden files should be ignored in validation."""
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    (skill_dir / ".hidden").write_text("hidden content")
+    (skill_dir / ".gitignore").write_text("*.pyc")
+
+    (skill_dir / "SKILL.md").write_text("""---
+name: my-skill
+description: A test skill
+---
+No file references.
+""")
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
+    assert errors == []
+
+
+def test_deep_hidden_files_ignored(tmp_path):
+    """Deeply hidden or excluded files should be ignored in validation."""
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    ref_dir = skill_dir / "references"
+    ref_dir.mkdir()
+    (ref_dir / ".hidden").write_text("hidden content")
+    (ref_dir / ".gitignore").write_text("*.pyc")
+    deep_dir = ref_dir / "node_modules"
+    deep_dir.mkdir()
+    (deep_dir / "todo").write_text("excluded content")
+
+    (skill_dir / "SKILL.md").write_text("""---
+name: my-skill
+description: A test skill
+---
+No file references.
+""")
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
+    assert errors == []
+
+
+def test_venv_files_ignored(tmp_path):
+    """Virtual environment files should be ignored."""
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    venv_dir = skill_dir / ".venv"
+    venv_dir.mkdir()
+    (venv_dir / "script.py").write_text("# venv script")
+
+    (skill_dir / "SKILL.md").write_text("""---
+name: my-skill
+description: A test skill
+---
+No file references.
+""")
+    warnings, errors = validate(skill_dir)
+    assert warnings == []
+    assert errors == []
+
+
+def test_file_referenced_in_other_skill_file(tmp_path):
+    """File orphaned in SKILL.md but referenced in another skill file should not warn."""
+    skill_dir = tmp_path / "my-skill"
+    skill_dir.mkdir()
+    refs_dir = skill_dir / "references"
+    refs_dir.mkdir()
+    scripts_dir = skill_dir / "scripts"
+    scripts_dir.mkdir()
+
+    # Create a reference file
+    (refs_dir / "GUIDE.md").write_text("# Guide")
+    # Create a script that references the guide
+    (scripts_dir / "run.py").write_text("# Script\n# See references/GUIDE.md")
+    # Orphan file not referenced anywhere
+    (refs_dir / "UNUSED.md").write_text("# Unused")
+
+    (skill_dir / "SKILL.md").write_text("""---
+name: my-skill
+description: A test skill
+---
+Run `scripts/run.py` to execute.
+""")
+    warnings, errors = validate(skill_dir)
+    # GUIDE.md is referenced in run.py, so should NOT be orphaned
+    # UNUSED.md is truly orphaned
+    assert len(warnings) == 1
+    assert "UNUSED.md" in warnings[0]
+    assert "GUIDE.md" not in warnings[0]

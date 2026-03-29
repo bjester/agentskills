@@ -39,8 +39,11 @@ def validate_cmd(skill_path: Path):
     if _is_skill_md_file(skill_path):
         skill_path = skill_path.parent
 
-    errors = validate(skill_path)
-
+    warnings, errors = validate(skill_path)
+    if warnings:
+        click.echo(f"Validation warnings for {skill_path}:", color="yellow")
+        for warning in warnings:
+            click.echo(f"  - {warning}", color="yellow")
     if errors:
         click.echo(f"Validation failed for {skill_path}:", err=True)
         for error in errors:
