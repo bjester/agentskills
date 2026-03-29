@@ -1,5 +1,7 @@
 """YAML frontmatter parsing for SKILL.md files."""
 
+from enum import Enum
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -7,6 +9,9 @@ import strictyaml
 
 from .errors import ParseError, ValidationError
 from .models import SkillProperties
+
+
+EXCLUDED_REFERENCE_NAMES = {"venv", "__pycache__", "node_modules"}
 
 
 def find_skill_md(skill_dir: Path) -> Optional[Path]:
@@ -110,3 +115,121 @@ def read_properties(skill_dir: Path) -> SkillProperties:
         allowed_tools=metadata.get("allowed-tools"),
         metadata=metadata.get("metadata"),
     )
+
+
+def _recurse_scan_skill_files(target_path: Path, relative_to: Path) -> list[Path]:
+    """Recursively scan skill directory for all files (excluding SKILL.md).
+
+    Returns relative paths from `relative_to`. Does not use `rglob` or `walk` to avoid unnecessary
+    traversal of directories that would be excluded.
+
+    Excludes:
+    - SKILL.md / skill.md (the main instruction file)
+    - Directories (only files)
+    - Hidden files/directories (starting with .)
+    - Symlinks
+
+    Args:
+        target_path: Path to the skill directory
+        relative_to: The directory path to format paths relative to
+    Returns:
+        List of relative file paths (as Path objects)
+    """
+    files = []
+
+    for path in target_path.glob("*"):
+        # Skip files either hidden, underneath a hidden directory, or in excluded names
+        if path.name.startswith(".") or path.name in EXCLUDED_REFERENCE_NAMES:
+            continue
+
+        if path.is_symlink():
+            continue
+
+        rel_path = path.relative_to(relative_to)
+
+        if path.is_dir():
+            files.extend(_recurse_scan_skill_files(path, relative_to))
+            continue
+
+        # SKILL.md don't require references
+        if path.name.lower() == "skill.md":
+            continue
+
+        files.append(rel_path)
+
+    return files
+
+
+def scan_skill_files(skill_dir: Path) -> list[Path]:
+    """Scan skill directory for all files (excluding SKILL.md).
+
+    Returns relative paths from skill root, e.g., ['references/GUIDE.md', 'scripts/run.py'].
+
+    See also _recurse_scan_skill_files.
+
+    Args:
+        skill_dir: Path to the skill directory
+
+    Returns:
+        List of relative file paths (as Path objects)
+    """
+    files = _recurse_scan_skill_files(skill_dir, skill_dir)
+    return sorted(files, key=lambda p: str(p))
+
+
+class ReferenceStatus(Enum):
+    found = 0
+    orphaned = 1
+    broken_path = 2
+
+
+def is_path_referenced(body: str, rel_path: Path) -> ReferenceStatus:
+    """Check if a file path is referenced in the SKILL.md body.
+
+    Searches for the path in multiple formats:
+    - Markdown links: [text](path/to/file)
+    - Inline code: `path/to/file`
+    - Bare text: path/to/file (as standalone text)
+
+    Normalizes Windows-style backslashes to forward slashes for comparison.
+
+    Args:
+        body: Markdown body content from SKILL.md
+        rel_path: Relative path to search for (e.g., Path('references/GUIDE.md'))
+
+    Returns:
+        ReferenceStatus:
+        - found: All references to this file use the correct path
+        - broken_path: At least one reference uses a wrong path (e.g., docs/X.md vs references/X.md)
+        - orphaned: File is not referenced at all
+    """
+    path_str_posix = rel_path.as_posix()
+    path_str_basename = rel_path.name
+
+    # Normalize body: replace backslashes with forward slashes
+    normalized_body = body.replace("\\", "/")
+
+    # Match path-like tokens ending in the basename.
+    # Supports:
+    # - basename only: GUIDE.md
+    # - one or more parent dirs: docs/GUIDE.md, docs/sub/GUIDE.md
+    token_pattern = re.compile(
+        rf"(?<![A-Za-z0-9._/-])"
+        rf"(?P<path>(?:[A-Za-z0-9._-]+/)*{re.escape(path_str_basename)})"
+        rf"(?=$|[^A-Za-z0-9._/-])"
+    )
+
+    found_correct = False
+
+    for match in token_pattern.finditer(normalized_body):
+        candidate = match.group("path")
+        if candidate == path_str_posix:
+            found_correct = True
+        else:
+            # Same basename at a different relative path indicates a broken path.
+            return ReferenceStatus.broken_path
+
+    if found_correct:
+        return ReferenceStatus.found
+    else:
+        return ReferenceStatus.orphaned
